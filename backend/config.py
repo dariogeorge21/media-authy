@@ -22,7 +22,21 @@ class Settings(BaseSettings):
         "*",
     ]
 
-    # OpenAI API Key (support standard OPENAI_API_KEY and custom OPEN_AI_API_KEY)
+    # LLM Provider selection ("groq", "openai", "auto")
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")
+
+    # Groq API Configuration (High-Performance LLM Reasoning)
+    GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    GROQ_FALLBACK_MODELS: List[str] = [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-20b",
+        "groq/compound-mini"
+    ]
+    GROQ_TEMPERATURE: float = 0.1
+
+    # OpenAI API Configuration (Secondary Fallback)
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY")
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_VISION_MODEL: str = "gpt-4o"
@@ -49,4 +63,3 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
-

@@ -2,6 +2,7 @@ import json
 import time
 from typing import Dict, Any, List, Tuple, Optional
 from PIL import Image
+from groq import Groq
 from openai import OpenAI
 
 from ..config import settings
@@ -15,7 +16,7 @@ from ..utils.image_ops import image_to_base64_data_uri, resize_for_analysis
 
 
 SYSTEM_PROMPT = """You are the Senior Forensic Intelligence Agent at MediaAuth, a world-class digital media verification platform.
-Your task is to analyze evidence from multi-stage forensic algorithms (Metadata, Error Level Analysis, FFT Frequency Domain, Sensor Noise Residuals, Biometric Consistency) combined with visual inspection of the image.
+Your task is to analyze evidence from multi-stage forensic algorithms (Metadata, Error Level Analysis, FFT Frequency Domain, Sensor Noise Residuals, Biometric Consistency, Spatial Artifacts).
 
 Analyze:
 1. Convergence of multi-modal forensic signals (do ELA, FFT, and Noise corroborate each other or conflict?).
@@ -84,10 +85,8 @@ def _build_deterministic_reasoning(
 ) -> Dict[str, Any]:
     """
     Fallback deterministic Bayesian evidence fusion engine.
-    Used when LLM API is offline or unconfigured.
+    Used when external LLM APIs are offline or unconfigured.
     """
-    # Weighted multi-signal fusion
-    # FFT and ELA carry significant weight for synthetic detection
     weights = {
         "fft": 0.28,
         "ela": 0.25,
@@ -104,18 +103,15 @@ def _build_deterministic_reasoning(
         artifact_score * weights["artifact"]
     )
 
-    # Adjust for metadata provenance
     if meta_summary.c2pa_manifest_present and meta_summary.c2pa_status == "valid":
         raw_tamper = min(raw_tamper * 0.15, 8.0)
     elif meta_summary.has_exif and meta_summary.camera_make and meta_summary.camera_model:
-        # Standard camera EXIF reduces synthetic probability slightly if signals are borderline
         if raw_tamper < 65.0:
             raw_tamper = max(raw_tamper * 0.75, 4.0)
 
     tamper_confidence = round(float(raw_tamper), 1)
     is_authentic = tamper_confidence < 38.0
 
-    # Model family estimation heuristic
     if meta_summary.c2pa_manifest_present:
         model_family = "C2PA Hardware Authenticated Camera"
     elif is_authentic:
@@ -130,7 +126,6 @@ def _build_deterministic_reasoning(
     else:
         model_family = "Synthetic Raster Artifacts / Neural Resampling"
 
-    # Multi-step reasoning trace
     reasoning_steps = [
         f"Step 1 [Provenance]: Metadata audit recorded {len(meta_summary.sanitized_metadata)} EXIF tags. C2PA provenance status: '{meta_summary.c2pa_status}'. Hardware signature: {meta_summary.camera_make or 'Not detected'}.",
         f"Step 2 [Spectral Corroboration]: 2D Fast Fourier Transform yielded {fft_score}% anomaly score with periodic harmonic lattice peaks. Error Level Analysis (ELA) indicated {ela_score}% quantization block delta.",
@@ -139,7 +134,6 @@ def _build_deterministic_reasoning(
         f"Step 5 [Bayesian Evidence Fusion]: Synthesized 5 independent forensic vectors. Multi-signal convergence yielded calibrated tamper probability of {tamper_confidence}%."
     ]
 
-    # Summary and forensic bullet points
     if is_authentic:
         exec_summary = (
             f"The analyzed media conforms to authentic physical camera capture characteristics ({tamper_confidence}% tamper probability). "
@@ -218,25 +212,15 @@ def reason_over_forensic_evidence(
 ) -> Dict[str, Any]:
     """
     Executes the multi-signal AI reasoning agent.
-    If OpenAI API key is configured and functional, performs multi-modal vision reasoning.
-    Otherwise, gracefully falls back to the deterministic Bayesian fusion reasoner.
+    Prioritizes Groq LLM (e.g., openai/gpt-oss-120b or qwen3.8) for ultra-fast high-reasoning inference,
+    with secondary fallback to OpenAI and deterministic Bayesian fusion reasoner.
     """
-    # 1. Check if OpenAI is available
-    if settings.OPENAI_API_KEY and len(settings.OPENAI_API_KEY.strip()) > 10:
-        try:
-            client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            
-            # Prepare low-res base64 image thumbnail for LLM vision inspection
-            thumb_img = resize_for_analysis(image.convert("RGB"), max_dimension=768)
-            thumb_b64 = image_to_base64_data_uri(thumb_img, format="JPEG", quality=85)
+    findings_summary_text = "\n".join([
+        f"- [{f.severity.upper()}] {f.title}: {f.description} (Corroboration: {f.corroboration}, Confidence: {f.confidence}%)"
+        for f in findings
+    ])
 
-            # Summarize findings for prompt
-            findings_summary_text = "\n".join([
-                f"- [{f.severity.upper()}] {f.title}: {f.description} (Corroboration: {f.corroboration}, Confidence: {f.confidence}%)"
-                for f in findings
-            ])
-
-            user_prompt = f"""Perform multi-stage forensic reasoning on this media:
+    user_prompt = f"""Perform multi-stage forensic reasoning on this media:
 
 TECHNICAL DETECTOR SCORES:
 - Error Level Analysis (ELA) Quantization Disparity: {ela_score}%
@@ -248,6 +232,7 @@ TECHNICAL DETECTOR SCORES:
 METADATA & PROVENANCE:
 - File Name: {meta_summary.file_name}
 - Dimensions: {meta_summary.dimensions}
+- Color Mode: {meta_summary.color_mode}
 - SHA-256: {meta_summary.sha256_hash}
 - Camera Profile: {meta_summary.camera_make or 'None'} {meta_summary.camera_model or 'None'}
 - Software Tag: {meta_summary.software or 'None'}
@@ -256,10 +241,58 @@ METADATA & PROVENANCE:
 EXTRACTED DETECTOR FINDINGS:
 {findings_summary_text or 'No critical isolated detector anomalies found.'}
 
-Carefully inspect the visual image for physical/semantic realism, cross-reference all 5 forensic detector scores, perform multi-step reasoning, and output the structured JSON report.
+Synthesize all 5 technical forensic vectors, evaluate physical/semantic realism, perform multi-step reasoning, and return the structured JSON report according to the schema.
 """
 
-            response = client.chat.completions.create(
+    # 1. Primary: Try Groq API
+    if settings.GROQ_API_KEY and len(settings.GROQ_API_KEY.strip()) > 8:
+        try:
+            groq_client = Groq(api_key=settings.GROQ_API_KEY)
+            
+            # Try configured Groq model and fallback models
+            models_to_try = [settings.GROQ_MODEL] + [
+                m for m in settings.GROQ_FALLBACK_MODELS if m != settings.GROQ_MODEL
+            ]
+            
+            for model_name in models_to_try:
+                try:
+                    response = groq_client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=settings.GROQ_TEMPERATURE,
+                        max_tokens=1500,
+                        timeout=5.0
+                    )
+                    
+                    content = response.choices[0].message.content
+                    if content:
+                        parsed = json.loads(content)
+                        conf_level, cal_summary, _ = validate_safety_claims(
+                            parsed.get("tamper_confidence", 50.0),
+                            parsed.get("executive_summary", ""),
+                            parsed.get("forensic_summary", [])
+                        )
+                        parsed["confidence_level"] = conf_level
+                        parsed["executive_summary"] = cal_summary
+                        return parsed
+                except Exception as model_err:
+                    print(f"[ForensicAgent] Groq model '{model_name}' attempt failed: {model_err}")
+                    continue
+        except Exception as groq_err:
+            print(f"[ForensicAgent] Groq client initialization failed: {groq_err}")
+
+    # 2. Secondary: Try OpenAI API
+    if settings.OPENAI_API_KEY and len(settings.OPENAI_API_KEY.strip()) > 10:
+        try:
+            openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            thumb_img = resize_for_analysis(image.convert("RGB"), max_dimension=768)
+            thumb_b64 = image_to_base64_data_uri(thumb_img, format="JPEG", quality=85)
+
+            response = openai_client.chat.completions.create(
                 model=settings.OPENAI_VISION_MODEL,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -283,11 +316,9 @@ Carefully inspect the visual image for physical/semantic realism, cross-referenc
                 timeout=5.0
             )
 
-            response_content = response.choices[0].message.content
-            if response_content:
-                parsed = json.loads(response_content)
-                
-                # Enforce safe claim validation
+            content = response.choices[0].message.content
+            if content:
+                parsed = json.loads(content)
                 conf_level, cal_summary, _ = validate_safety_claims(
                     parsed.get("tamper_confidence", 50.0),
                     parsed.get("executive_summary", ""),
@@ -296,11 +327,10 @@ Carefully inspect the visual image for physical/semantic realism, cross-referenc
                 parsed["confidence_level"] = conf_level
                 parsed["executive_summary"] = cal_summary
                 return parsed
-        except Exception as e:
-            # If OpenAI fails or rate limits, seamlessly proceed with deterministic fallback
-            print(f"[ForensicAgent] LLM API call fallback due to: {e}")
+        except Exception as openai_err:
+            print(f"[ForensicAgent] OpenAI fallback failed: {openai_err}")
 
-    # Fallback to deterministic Bayesian fusion reasoner
+    # 3. Fallback: Deterministic Bayesian fusion reasoner
     return _build_deterministic_reasoning(
         meta_summary=meta_summary,
         ela_score=ela_score,
