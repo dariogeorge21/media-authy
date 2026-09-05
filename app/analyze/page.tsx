@@ -28,7 +28,7 @@ import { CompareLens } from "@/components/analysis/compare-lens";
 import { ForensicReportModal } from "@/components/analysis/forensic-report-modal";
 import { NoiseOverlay, GridLinesBackground } from "@/components/layout/noise-overlay";
 import { CustomCursor } from "@/components/cursor/custom-cursor";
-import { analyzeMediaPayload } from "@/lib/forensic-api";
+import { analyzeMediaPayload, streamMediaAnalysis, StreamEvent } from "@/lib/forensic-api";
 import { playClick, playScanBlip, playVerificationComplete, toggleAudio, isAudioEnabled } from "@/lib/audio-synth";
 
 export default function DedicatedAnalyzePage() {
@@ -36,6 +36,8 @@ export default function DedicatedAnalyzePage() {
   const [activeLayer, setActiveLayer] = useState<"ela" | "fft" | "noise" | "biometric">("ela");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [currentStageText, setCurrentStageText] = useState<string>("Initializing deep forensic agent pipeline...");
+  const [liveReasoningLogs, setLiveReasoningLogs] = useState<string[]>([]);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
@@ -81,31 +83,48 @@ export default function DedicatedAnalyzePage() {
     setCustomFile(file);
     setIsAnalyzing(true);
     setAnalysisProgress(10);
+    setCurrentStageText("Transmitting payload to FastAPI Forensic Agent...");
+    setLiveReasoningLogs([]);
     playScanBlip(1);
 
-    // Progressive simulated telemetry ticks
-    const interval = setInterval(() => {
-      setAnalysisProgress((prev) => {
-        if (prev >= 85) {
-          clearInterval(interval);
-          return 85;
+    try {
+      const result = await streamMediaAnalysis(file, (ev: StreamEvent) => {
+        if (ev.event === "analysis_started") {
+          setAnalysisProgress(15);
+          setCurrentStageText("Cryptographic hash attested. Initializing detectors...");
+          playScanBlip(1);
+        } else if (ev.event === "check_progress") {
+          setAnalysisProgress(ev.progress_percentage || 50);
+          if (ev.current_action) {
+            setCurrentStageText(ev.current_action);
+          }
+          playScanBlip(Math.floor((ev.progress_percentage || 50) / 20) + 1);
+        } else if (ev.event === "stage_completed") {
+          if (ev.stage_result?.stage_name) {
+            setCurrentStageText(`Completed: ${ev.stage_result.stage_name}`);
+          }
+        } else if (ev.event === "reasoning_step") {
+          setAnalysisProgress(95);
+          if (ev.thought_process) {
+            setCurrentStageText(ev.thought_process);
+            setLiveReasoningLogs((prev) => [...prev, ev.thought_process]);
+          }
+        } else if (ev.event === "final_verdict") {
+          setAnalysisProgress(100);
+          setCurrentStageText("Forensic dossier compiled.");
         }
-        playScanBlip(Math.floor(prev / 20) + 1);
-        return prev + 15;
       });
-    }, 120);
 
-    // Execute through FastAPI bridge / fallback
-    const result = await analyzeMediaPayload(file);
-
-    clearInterval(interval);
-    setAnalysisProgress(100);
-
-    setTimeout(() => {
-      setSelectedSample(result);
+      setAnalysisProgress(100);
+      setTimeout(() => {
+        setSelectedSample(result);
+        setIsAnalyzing(false);
+        playVerificationComplete(result.isAuthentic);
+      }, 400);
+    } catch (err) {
+      console.error("Analysis execution error:", err);
       setIsAnalyzing(false);
-      playVerificationComplete(result.isAuthentic);
-    }, 300);
+    }
   };
 
   const handleLoadPreset = (preset: ForensicSample) => {
@@ -287,23 +306,34 @@ export default function DedicatedAnalyzePage() {
 
               {/* Central Ingestion Trigger or Active Scanning State */}
               {isAnalyzing ? (
-                <div className="space-y-4 max-w-md">
+                <div className="space-y-4 max-w-lg">
                   <Scan size={42} className="text-[#FF3B00] mx-auto animate-pulse" />
-                  <div className="space-y-1 font-mono">
+                  <div className="space-y-2 font-mono">
                     <p className="text-xs text-[#FF3B00] uppercase tracking-widest font-bold">
-                      // TRANSMITTING TO FORENSIC AGENT PIPELINE
+                      // LIVE FASTAPI AGENT STREAM
                     </p>
-                    <p className="text-3xl font-display font-black text-[#0A0A0C]">{analysisProgress}%</p>
-                    <p className="text-xs text-[#64646E]">
-                      Extracting spatial ELA, FFT Fourier harmonics, and sensor noise...
+                    <p className="text-4xl font-display font-black text-[#0A0A0C]">{analysisProgress}%</p>
+                    <p className="text-xs text-[#0A0A0C] font-semibold transition-all duration-200">
+                      {currentStageText}
                     </p>
                   </div>
-                  <div className="w-56 h-1.5 bg-[#F2F2EE] mx-auto overflow-hidden">
+                  <div className="w-64 h-1.5 bg-[#F2F2EE] mx-auto overflow-hidden">
                     <div
-                      className="h-full bg-[#FF3B00] transition-all duration-100"
+                      className="h-full bg-[#FF3B00] transition-all duration-150"
                       style={{ width: `${analysisProgress}%` }}
                     />
                   </div>
+
+                  {liveReasoningLogs.length > 0 && (
+                    <div className="mt-4 p-3 bg-[#F2F2EE] hairline-all font-mono text-[10px] text-left text-[#383838] space-y-1 max-h-28 overflow-y-auto">
+                      <span className="text-[#9898A4] block uppercase font-bold">// AGENT REASONING STREAM:</span>
+                      {liveReasoningLogs.slice(-2).map((log, idx) => (
+                        <p key={idx} className="text-[#0A0A0C] truncate">
+                          &gt; {log}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-6 max-w-lg">
