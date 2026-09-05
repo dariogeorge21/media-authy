@@ -15,3 +15,4 @@ __all__ = [
     "format_file_size",
     "resize_for_analysis",
 ]
+

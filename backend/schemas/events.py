@@ -73,3 +73,4 @@ class ErrorEvent(BaseAnalysisEvent):
     error_code: str
     message: str
     details: Optional[Dict[str, Any]] = None
+

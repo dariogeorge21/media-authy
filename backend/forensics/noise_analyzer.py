@@ -152,3 +152,4 @@ def analyze_sensor_noise(
     )
 
     return latent_noise_score, stage_result, findings, noise_b64
+

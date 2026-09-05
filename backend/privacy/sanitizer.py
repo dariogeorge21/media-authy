@@ -110,3 +110,4 @@ def create_privacy_audit(gps_redacted: bool = True, serials_redacted: bool = Tru
         gps_coordinates_stripped=gps_redacted,
         camera_serials_stripped=serials_redacted
     )
+

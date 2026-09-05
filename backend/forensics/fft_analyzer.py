@@ -160,3 +160,4 @@ def analyze_frequency_domain(
     )
 
     return fft_anomaly_score, stage_result, findings, fft_b64
+

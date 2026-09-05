@@ -129,3 +129,4 @@ async def test_full_pipeline_orchestrator():
     assert "fft_anomaly_score" in report
     assert "attestation_hash" in report
     assert report["privacy_audit"]["pii_redacted"] is True
+

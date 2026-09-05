@@ -62,3 +62,4 @@ async def test_analyze_stream_endpoint():
         text = res.text
         assert "analysis_started" in text
         assert "final_verdict" in text
+

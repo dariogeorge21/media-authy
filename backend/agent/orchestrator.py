@@ -341,3 +341,4 @@ class ForensicPipelineOrchestrator:
             raise RuntimeError("Analysis pipeline finished without producing a final verdict")
         
         return final_report
+

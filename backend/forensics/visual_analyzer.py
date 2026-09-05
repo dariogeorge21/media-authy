@@ -130,3 +130,4 @@ def analyze_visual_artifacts(
     )
 
     return biometric_score, visual_artifact_score, stage_result, findings
+

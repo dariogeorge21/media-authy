@@ -11,3 +11,4 @@ __all__ = [
     "analyze_sensor_noise",
     "analyze_visual_artifacts",
 ]
+

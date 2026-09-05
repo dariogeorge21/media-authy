@@ -182,3 +182,4 @@ def parse_metadata_and_provenance(
     )
 
     return meta_summary, stage_result, findings
+

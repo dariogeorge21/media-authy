@@ -139,3 +139,4 @@ def analyze_error_level(
     )
 
     return ela_score, stage_result, findings, heatmap_b64
+

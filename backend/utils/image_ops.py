@@ -69,3 +69,4 @@ def numpy_to_base64_data_uri(arr: np.ndarray, format: str = "PNG") -> str:
     
     img = Image.fromarray(arr)
     return image_to_base64_data_uri(img, format=format)
+
